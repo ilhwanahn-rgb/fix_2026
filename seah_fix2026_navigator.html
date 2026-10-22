@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="세아 FIX 네비">
+<meta name="theme-color" content="#050811">
+<title>세아 CDM 디지털 트윈 네비</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="pretendard-cdn" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700;800&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<style>
+/* Layout concept: full-bleed WebGL stage with floating glass HUD islands — top Dynamic Island, right viewport rail, bottom step rail, left dock (desktop) / bottom sheet (mobile). */
+:root{
+  color-scheme: dark;
+  --void:#050811;        /* deep obsidian stage */
+  --panel:#07090E;       /* island base */
+  --panel-2:#0F172A;     /* raised surface */
+  --ink:#E8EEF8;         /* primary text */
+  --ink-dim:#94A3B8;     /* secondary text */
+  --ink-faint:#5A6B85;   /* tertiary text */
+  --cy:#00D2FF;          /* cyber electric blue */
+  --cy-deep:#2563EB;
+  --am:#F59E0B;          /* laser amber */
+  --am-lit:#FBBF24;
+  --em:#10B981;          /* emerald pulse */
+  --danger:#F43F5E;
+  --stroke:rgba(255,255,255,.08);
+  --stroke-lit:rgba(255,255,255,.16);
+  --glass:rgba(9,14,26,.62);
+  --glass-solid:rgba(8,12,22,.9);
+  --font-kr:'Pretendard Variable','Pretendard',-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
+  --r-lg:22px; --r-md:14px; --r-sm:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;font-family:var(--font-kr);background:var(--void);color:var(--ink);
+  overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;
+  font-feature-settings:"tnum" 0;
+  padding-left:max(0px,env(safe-area-inset-left,0px));
+  padding-right:max(0px,env(safe-area-inset-right,0px));
+}
+input,textarea,select{-webkit-user-select:text;user-select:text}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.ovr{letter-spacing:.14em;text-transform:uppercase}
+
+/* ---------- WebGL stage ---------- */
+#webgl-canvas{position:fixed;inset:0;width:100%;height:100%;z-index:0;display:block;outline:none;touch-action:none}
+#stage-vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(130% 95% at 50% 8%,transparent 38%,rgba(2,4,10,.55) 78%,rgba(2,4,10,.92) 100%);}
+#stage-scan{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.22;mix-blend-mode:overlay;
+  background:repeating-linear-gradient(180deg,rgba(130,210,255,.10) 0 1px,transparent 1px 3px);}
+#boot-veil{position:fixed;inset:0;z-index:70;background:var(--void);display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:14px;transition:opacity .6s ease}
+#boot-veil.gone{opacity:0;pointer-events:none}
+
+/* ---------- glass system ---------- */
+.glass{
+  background:var(--glass);
+  backdrop-filter:blur(20px) saturate(170%);
+  -webkit-backdrop-filter:blur(20px) saturate(170%);
+  border:1px solid var(--stroke);
+  box-shadow:0 18px 50px -12px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.glass-deep{
+  background:var(--glass-solid);
+  backdrop-filter:blur(26px) saturate(180%);
+  -webkit-backdrop-filter:blur(26px) saturate(180%);
+  border:1px solid var(--stroke);
+  box-shadow:0 30px 80px -20px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.hairline{border:1px solid var(--stroke)}
+.edge-cy{box-shadow:0 0 0 1px rgba(0,210,255,.32), 0 0 26px -6px rgba(0,210,255,.55)}
+.edge-am{box-shadow:0 0 0 1px rgba(245,158,11,.34), 0 0 26px -6px rgba(245,158,11,.5)}
+
+/* ---------- icons ---------- */
+.ic{width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round}
+.ic-f{fill:currentColor;stroke:none}
+#icon-sprite{position:absolute;width:0;height:0;overflow:hidden}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--stroke);
+  background:rgba(148,163,184,.08);color:var(--ink-dim);border-radius:var(--r-md);font-weight:700;
+  transition:transform .14s cubic-bezier(.2,.9,.3,1),background .18s,color .18s,box-shadow .18s;cursor:pointer}
+.btn:hover{background:rgba(148,163,184,.16);color:#fff}
+.btn:active{transform:scale(.94)}
+.btn:focus-visible{outline:2px solid var(--cy);outline-offset:2px}
+.btn-cy{background:linear-gradient(135deg,rgba(0,210,255,.95),rgba(37,99,235,.95));color:#04121c;border-color:rgba(125,228,255,.45);
+  box-shadow:0 10px 28px -10px rgba(0,210,255,.75)}
+.btn-cy:hover{color:#04121c;filter:brightness(1.07)}
+.btn-am{background:linear-gradient(135deg,var(--am-lit),var(--am));color:#1a1203;border-color:rgba(253,224,71,.45);
+  box-shadow:0 10px 28px -10px rgba(245,158,11,.75)}
+.btn-am:hover{color:#1a1203;filter:brightness(1.07)}
+.btn-ghost-cy{color:var(--cy);border-color:rgba(0,210,255,.3);background:rgba(0,210,255,.1)}
+.btn-ghost-cy:hover{background:rgba(0,210,255,.2);color:#9ef0ff}
+.btn-ghost-am{color:var(--am-lit);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.1)}
+.btn-ghost-am:hover{background:rgba(245,158,11,.2);color:#ffd98a}
+.btn-ghost-em{color:var(--em);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.1)}
+.btn-ghost-em:hover{background:rgba(16,185,129,.2);color:#6ee7b7}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+
+/* ---------- dynamic island ---------- */
+#island{border-radius:26px;padding:7px 12px 7px 8px;display:flex;align-items:center;gap:9px}
+#island .emblem{width:30px;height:30px;border-radius:11px;display:grid;place-items:center;font-weight:900;font-size:14px;
+  background:linear-gradient(145deg,#00D2FF,#2563EB);color:#031018;box-shadow:0 0 20px -4px rgba(0,210,255,.85)}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--em);box-shadow:0 0 0 0 rgba(16,185,129,.65);animation:ping 2.1s infinite}
+.live-dot.warn{background:var(--am);animation:ping-am 2.1s infinite}
+.live-dot.off{background:var(--ink-faint);animation:none;box-shadow:none}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(16,185,129,.6)}70%{box-shadow:0 0 0 7px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+@keyframes ping-am{0%{box-shadow:0 0 0 0 rgba(245,158,11,.6)}70%{box-shadow:0 0 0 7px rgba(245,158,11,0)}100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}}
+
+/* ---------- step rail ---------- */
+.step-node{position:relative;flex:none;width:34px;height:34px;border-radius:13px;display:grid;place-items:center;
+  font-family:var(--font-mono);font-weight:800;font-size:12px;color:var(--ink-faint);
+  background:rgba(148,163,184,.07);border:1px solid var(--stroke);cursor:pointer;
+  transition:transform .18s cubic-bezier(.2,.9,.3,1),background .2s,color .2s,box-shadow .2s}
+.step-node:hover{color:#fff;background:rgba(148,163,184,.17)}
+.step-node:active{transform:scale(.9)}
+.step-node.done{color:var(--em);border-color:rgba(16,185,129,.35);background:rgba(16,185,129,.1)}
+.step-node.active{color:#04121c;background:linear-gradient(140deg,#00D2FF,#2563EB);border-color:rgba(125,228,255,.6);
+  box-shadow:0 0 22px -4px rgba(0,210,255,.9);transform:translateY(-2px) scale(1.06)}
+.step-node .tick{position:absolute;top:-3px;right:-3px;width:11px;height:11px;border-radius:50%;background:var(--am-lit);
+  border:2px solid #080c16;display:none}
+.step-node.done .tick,.step-node.active.done .tick{display:block}
+#rail-track{position:absolute;left:10px;right:10px;top:50%;height:1px;background:linear-gradient(90deg,transparent,rgba(0,210,255,.3),rgba(245,158,11,.25),transparent);pointer-events:none}
+
+/* ---------- detail card ---------- */
+.bento{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bento .cell{background:rgba(148,163,184,.055);border:1px solid var(--stroke);border-radius:var(--r-md);padding:10px 11px}
+.bento .cell.wide{grid-column:1/-1}
+.cell-label{font-size:9.5px;font-weight:800;color:var(--ink-faint);letter-spacing:.12em;text-transform:uppercase;display:flex;align-items:center;gap:5px;margin-bottom:5px}
+.grabber{width:40px;height:4px;border-radius:99px;background:rgba(148,163,184,.4);margin:0 auto 10px}
+
+/* ---------- modals ---------- */
+.modal{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(2,4,10,.78);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  opacity:0;pointer-events:none;transition:opacity .28s ease}
+.modal.open{opacity:1;pointer-events:auto}
+.modal .sheet{width:100%;transform:translateY(26px) scale(.985);transition:transform .38s cubic-bezier(.16,1,.3,1);
+  max-height:92dvh;overflow-y:auto}
+.modal.open .sheet{transform:translateY(0) scale(1)}
+@media (min-width:640px){.modal{align-items:center;padding:16px}}
+
+/* ---------- form atoms ---------- */
+.field{width:100%;background:rgba(2,6,16,.72);border:1px solid var(--stroke);border-radius:var(--r-md);
+  padding:9px 11px;font-size:12.5px;color:var(--ink);transition:border-color .18s,box-shadow .18s;font-family:inherit}
+.field::placeholder{color:#4a5a73}
+.field:focus{outline:none;border-color:rgba(0,210,255,.6);box-shadow:0 0 0 3px rgba(0,210,255,.12)}
+select.field{appearance:none;background-image:linear-gradient(45deg,transparent 50%,#64748b 50%),linear-gradient(135deg,#64748b 50%,transparent 50%);
+  background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:26px}
+.chip{border:1px solid var(--stroke);background:rgba(148,163,184,.07);color:var(--ink-dim);border-radius:9px;
+  padding:4px 8px;font-size:10.5px;font-weight:700;cursor:pointer;transition:all .16s}
+.chip:hover{background:rgba(0,210,255,.14);color:#9ef0ff;border-color:rgba(0,210,255,.35)}
+.chip:active{transform:scale(.93)}
+.chip.on{background:rgba(0,210,255,.2);color:#9ef0ff;border-color:rgba(0,210,255,.5)}
+.bcheck{display:flex;align-items:center;gap:7px;padding:8px 9px;border-radius:var(--r-md);cursor:pointer;
+  background:rgba(148,163,184,.05);border:1px solid var(--stroke);font-size:11px;font-weight:600;color:var(--ink-dim);transition:all .16s}
+.bcheck:has(input:checked){background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.4);color:#a7f3d0}
+.bcheck input{accent-color:#10B981;width:14px;height:14px;flex:none}
+.rec-on{animation:recpulse 1.1s infinite}
+@keyframes recpulse{0%,100%{color:#f43f5e;transform:scale(1)}50%{color:#fb7185;transform:scale(1.14)}}
+
+/* ---------- misc ---------- */
+.noscroll::-webkit-scrollbar{display:none}
+.noscroll{-ms-overflow-style:none;scrollbar-width:none}
+.thinbar::-webkit-scrollbar{width:5px;height:5px}
+.thinbar::-webkit-scrollbar-thumb{background:rgba(0,210,255,.3);border-radius:99px}
+.thinbar::-webkit-scrollbar-track{background:transparent}
+#toast{transition:transform .36s cubic-bezier(.16,1,.3,1),opacity .3s}
+#toast.hide{transform:translate(-50%,-150%);opacity:0}
+.idea-card{background:rgba(148,163,184,.055);border:1px solid var(--stroke);border-radius:var(--r-md);padding:11px}
+.idea-card.pending{border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.06)}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fade-up{animation:fadeUp .5s cubic-bezier(.16,1,.3,1) both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- responsive helpers ---------- */
+.wide-only{display:none}
+@media (min-width:430px){.wide-only{display:inline}}
+
+/* ---------- booth detail card: bottom sheet (mobile) / left dock (desktop) ---------- */
+#booth-card{
+  position:fixed;z-index:24;left:0;right:0;bottom:0;
+  border-radius:26px 26px 0 0;
+  padding:12px max(14px,env(safe-area-inset-left,0px)) calc(116px + env(safe-area-inset-bottom,0px));
+  max-height:min(50dvh,420px);overflow-y:auto;
+  transition:transform .42s cubic-bezier(.16,1,.3,1),opacity .3s ease;
+}
+#booth-card.closed{transform:translateY(calc(100% + 32px));opacity:0;pointer-events:none}
+#btn-dock{position:fixed;z-index:26;left:auto;right:max(10px,env(safe-area-inset-right,0px));
+  bottom:calc(118px + env(safe-area-inset-bottom,0px));top:auto;
+  padding:8px 11px;font-size:11px;border-radius:14px;opacity:0;pointer-events:none;transition:opacity .25s}
+@media (min-width:860px){
+  #booth-card{
+    left:max(14px,env(safe-area-inset-left,0px));right:auto;top:92px;bottom:auto;
+    width:392px;border-radius:22px;
+    padding:14px 15px 15px;
+    max-height:calc(100dvh - 210px);
+  }
+  #booth-card.closed{transform:translateX(calc(-100% - 30px));opacity:0}
+  #booth-card .grabber{display:none}
+  #btn-dock{left:max(14px,env(safe-area-inset-left,0px));right:auto;top:92px;bottom:auto}
+}
+
+</style>
+</head>
+<body>
+
+<svg id="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8v-13"/><path d="M4.5 12c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.2 18.2h5.6M10.4 21h3.2"/><path d="M12 3a6.2 6.2 0 0 0-3.6 11.25c.6.44.9 1.1.9 1.8v.15h5.4v-.15c0-.7.3-1.36.9-1.8A6.2 6.2 0 0 0 12 3Z"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 4.5 8 12l7 7.5"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 4.5 7 7.5-7 7.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 15 7-7 7 7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4.2L19.3 8.9a2.6 2.6 0 0 0-3.7-3.7L4.5 16.3 4 20Z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5.5" cy="18.5" r="2.4"/><circle cx="18.5" cy="5.5" r="2.4"/><path d="M8 18.5h6a3.6 3.6 0 0 0 0-7.2h-4a3.6 3.6 0 0 1 0-7.2h6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path class="ic-f" d="M7.5 4.8 19 12 7.5 19.2z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" stroke-width="3"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M9 3.5H5.5A2 2 0 0 0 3.5 5.5V9M15 3.5h3.5a2 2 0 0 1 2 2V9M9 20.5H5.5a2 2 0 0 1-2-2V15M15 20.5h3.5a2 2 0 0 0 2-2V15"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 1.8v3.4M12 18.8v3.4M1.8 12h3.4M18.8 12h3.4"/><circle class="ic-f" cx="12" cy="12" r="2.1"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2.6" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.2M9.3 21.2h5.4"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3.5h11L20 7.5v13H5z"/><path d="M8.5 3.5v5.2h7.5V3.5M8.5 20.5v-6.8h7v6.8"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.8" y="8.8" width="11.7" height="11.7" rx="2.4"/><path d="M5.2 15.2V6a2.4 2.4 0 0 1 2.4-2.4h8.6"/></symbol>
+  <symbol id="i-sheet" viewBox="0 0 24 24"><path d="M13.6 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.4z"/><path d="M13.6 3v5.4H19"/><path d="M8.6 13.2 11 18l2.4-4.8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 0 1-14.6 5.9M3.5 12a8.5 8.5 0 0 1 14.6-5.9"/><path d="M3.5 19v-4.6h4.6M20.5 5v4.6h-4.6"/></symbol>
+  <symbol id="i-factory" viewBox="0 0 24 24"><path d="M3 20.5V10l5.5 3.6V10L14 13.6V6.2l7 4.4v9.9z"/><path d="M7 17.2h1.6M12 17.2h1.6M17 17.2h1.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.2 12S5.9 5.8 12 5.8 21.8 12 21.8 12 18.1 18.2 12 18.2 2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="2.6"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.2 21.5V3M5.2 3.6h12.4l-2.6 4.3 2.6 4.3H5.2"/></symbol>
+  <symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M3.8 12h15.4M13.6 6.2 19.4 12l-5.8 5.8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="m8.2 12.3 2.6 2.6 4.9-5.4"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path class="ic-f" d="M13.4 2 4.6 14.2h5.6L9 22l9-12.4h-5.9z"/></symbol>
+  <symbol id="i-signal" viewBox="0 0 24 24"><path d="M3.6 10.4a12 12 0 0 1 16.8 0M7.2 14a7 7 0 0 1 9.6 0"/><circle class="ic-f" cx="12" cy="18.2" r="1.5"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 2.4 8.6 4.8v9.6L12 21.6 3.4 16.8V7.2z"/><path d="m3.4 7.2 8.6 4.8 8.6-4.8M12 12v9.6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.4" y="3.4" width="7.2" height="7.2" rx="1.6"/><rect x="13.4" y="3.4" width="7.2" height="7.2" rx="1.6"/><rect x="3.4" y="13.4" width="7.2" height="7.2" rx="1.6"/><rect x="13.4" y="13.4" width="7.2" height="7.2" rx="1.6"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.4 11V4.6a1.2 1.2 0 0 1 1.2-1.2H11l9.1 9.1a1.7 1.7 0 0 1 0 2.4l-6.4 6.4a1.7 1.7 0 0 1-2.4 0z"/><circle class="ic-f" cx="7.6" cy="7.6" r="1.4"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 2.6a6.4 6.4 0 0 0-6.4 6.4c0 4.6 6.4 12.4 6.4 12.4S18.4 13.6 18.4 9A6.4 6.4 0 0 0 12 2.6Z"/><circle cx="12" cy="9" r="2.4"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5.4" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="18.6" r="2.6"/><path d="m8.3 10.8 7.4-4.1M8.3 13.2l7.4 4.1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.4 6.4h15.2M9.4 6.4V4.6a1.2 1.2 0 0 1 1.2-1.2h2.8a1.2 1.2 0 0 1 1.2 1.2v1.8M6.4 6.4l1 13a1.4 1.4 0 0 0 1.4 1.3h6.4a1.4 1.4 0 0 0 1.4-1.3l1-13"/></symbol>
+</svg>
+
+<canvas id="webgl-canvas"></canvas>
+<div id="stage-vignette"></div>
+<div id="stage-scan"></div>
+
+<!-- Boot veil -->
+<div id="boot-veil">
+  <div class="mono ovr" style="font-size:10px;color:#00D2FF">SeAH CDM · DIGITAL TWIN</div>
+  <div style="width:170px;height:2px;background:rgba(0,210,255,.14);border-radius:99px;overflow:hidden">
+    <div id="boot-bar" style="height:100%;width:8%;background:linear-gradient(90deg,#00D2FF,#FBBF24);transition:width .4s ease"></div>
+  </div>
+  <div id="boot-msg" class="mono" style="font-size:10px;color:#5A6B85">INITIALIZING SCENE…</div>
+</div>
+
+<!-- ======================= TOP DYNAMIC ISLAND ======================= -->
+<header style="position:fixed;top:0;left:0;right:0;z-index:30;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;
+   padding-top:max(8px,env(safe-area-inset-top,0px));padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));pointer-events:none">
+
+  <div id="island" class="glass" style="pointer-events:auto">
+    <div class="emblem">S</div>
+    <div style="min-width:0">
+      <div style="display:flex;align-items:center;gap:5px">
+        <span class="mono ovr" style="font-size:8.5px;color:var(--cy);font-weight:800">SEAH CDM</span>
+        <span class="mono" style="font-size:8px;font-weight:800;padding:1px 5px;border-radius:5px;background:rgba(245,158,11,.16);color:var(--am-lit);border:1px solid rgba(245,158,11,.3)">FIX&nbsp;2026</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;margin-top:1px">
+        <span style="font-size:11.5px;font-weight:800;letter-spacing:-.02em;white-space:nowrap">봉강생산팀 3D 네비</span>
+        <span id="link-dot" class="live-dot off"></span>
+        <span id="link-label" class="mono" style="font-size:8.5px;color:var(--ink-faint);font-weight:700">LOCAL</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:6px;pointer-events:auto">
+    <button id="btn-board" class="btn btn-ghost-am" style="padding:7px 9px;font-size:11px;border-radius:14px">
+      <svg class="ic" style="font-size:13px"><use href="#i-db"/></svg>
+      <span class="wide-only">아이디어함</span>
+      <span id="badge-count" class="mono" style="min-width:18px;padding:1px 5px;border-radius:99px;background:var(--am);color:#1a1203;font-size:9.5px;font-weight:800">0</span>
+    </button>
+    <button id="btn-new" class="btn btn-cy" style="padding:7px 11px;font-size:11px;border-radius:14px">
+      <svg class="ic" style="font-size:13px"><use href="#i-bulb"/></svg><span>등록</span>
+    </button>
+  </div>
+</header>
+
+<!-- ======================= VIEWPORT RAIL ======================= -->
+<div style="position:fixed;z-index:25;top:84px;right:max(10px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:7px">
+  <div class="glass" style="border-radius:16px;padding:4px;display:flex;flex-direction:column;gap:4px">
+    <button id="v-iso" class="btn btn-cy mono" style="width:34px;height:34px;border-radius:12px;font-size:10px;padding:0" title="입체 조감도">3D</button>
+    <button id="v-top" class="btn mono" style="width:34px;height:34px;border-radius:12px;font-size:10px;padding:0" title="평면 2D 맵">2D</button>
+    <button id="v-reset" class="btn" style="width:34px;height:34px;border-radius:12px;font-size:13px;padding:0" title="시점 원위치"><svg class="ic"><use href="#i-fit"/></svg></button>
+  </div>
+  <div class="glass" style="border-radius:16px;padding:4px;display:flex;flex-direction:column;gap:4px">
+    <button id="v-route" class="btn btn-ghost-em" style="width:34px;height:34px;border-radius:12px;font-size:14px;padding:0" title="최적 동선 토글"><svg class="ic"><use href="#i-route"/></svg></button>
+    <button id="v-tour" class="btn btn-ghost-am" style="width:34px;height:34px;border-radius:12px;font-size:14px;padding:0" title="1~11번 자동 투어"><svg class="ic" id="tour-icon"><use href="#i-play"/></svg></button>
+  </div>
+</div>
+
+<!-- Dock re-open tab (desktop) -->
+<button id="btn-dock" class="btn btn-ghost-am glass">
+  <svg class="ic" style="font-size:13px"><use href="#i-eye"/></svg><span>부스 상세</span>
+</button>
+
+<!-- ======================= BOOTH DETAIL CARD ======================= -->
+<section id="booth-card" class="glass-deep closed thinbar">
+  <div class="grabber" id="grabber"></div>
+
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--stroke)">
+    <div style="min-width:0">
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:5px">
+        <span id="d-step" class="mono" style="padding:2px 7px;border-radius:7px;font-size:9.5px;font-weight:800;background:linear-gradient(135deg,#00D2FF,#2563EB);color:#04121c">STEP 01</span>
+        <span id="d-id" class="mono" style="padding:2px 8px;border-radius:7px;font-size:11px;font-weight:800;background:rgba(245,158,11,.14);color:var(--am-lit);border:1px solid rgba(245,158,11,.4)">W2-219</span>
+        <span id="d-track" style="padding:2px 7px;border-radius:7px;font-size:9.5px;font-weight:700;background:rgba(168,85,247,.16);color:#d8b4fe;border:1px solid rgba(168,85,247,.3)">T3. AI 예지보전</span>
+      </div>
+      <h2 id="d-company" style="margin:0;font-size:17px;font-weight:900;letter-spacing:-.03em;line-height:1.2">원프레딕트</h2>
+      <div id="d-hall" style="font-size:10.5px;color:var(--ink-faint);font-weight:600;margin-top:2px">ITCE 서관 2홀</div>
+    </div>
+    <div style="display:flex;gap:5px;flex:none">
+      <button id="d-collapse" class="btn" style="width:28px;height:28px;border-radius:9px;font-size:13px;padding:0" title="접기"><svg class="ic"><use href="#i-down"/></svg></button>
+      <button id="d-close" class="btn" style="width:28px;height:28px;border-radius:9px;font-size:13px;padding:0" title="닫기"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+  </div>
+
+  <div class="bento" style="margin-top:10px">
+    <div class="cell wide" style="border-color:rgba(0,210,255,.22);background:linear-gradient(180deg,rgba(0,210,255,.08),rgba(0,210,255,.02))">
+      <div class="cell-label" style="color:var(--cy)"><svg class="ic" style="font-size:12px"><use href="#i-factory"/></svg>CDM 공정 접목 포인트</div>
+      <p id="d-process" style="margin:0;font-size:12.5px;line-height:1.55;color:#DCE7F7;font-weight:500">CDM 메인 인발 캐리지 감속기 &amp; 2롤 교정기 롤러 베어링 상태진단</p>
+    </div>
+    <div class="cell wide">
+      <div class="cell-label" style="color:var(--em)"><svg class="ic" style="font-size:12px"><use href="#i-eye"/></svg>현장 핵심 관전 포인트</div>
+      <p id="d-highlight" style="margin:0;font-size:12px;line-height:1.55;color:var(--ink-dim);font-weight:500">국내 1위 산업 AI 예지보전 GuardiOne</p>
+    </div>
+    <div class="cell">
+      <div class="cell-label"><svg class="ic" style="font-size:12px"><use href="#i-pen"/></svg>등록 아이디어</div>
+      <div><span id="d-ideacount" class="mono" style="font-size:19px;font-weight:800;color:var(--am-lit)">0</span><span style="font-size:11px;color:var(--ink-faint);font-weight:700">&nbsp;건</span></div>
+    </div>
+    <div class="cell">
+      <div class="cell-label"><svg class="ic" style="font-size:12px"><use href="#i-pin"/></svg>다음 목적지</div>
+      <div id="d-next" style="font-size:11.5px;font-weight:700;color:var(--cy);line-height:1.3">2. 그룸깃다</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:7px;margin-top:10px">
+    <button id="d-add" class="btn btn-am" style="flex:1;padding:11px;font-size:12px;border-radius:14px">
+      <svg class="ic" style="font-size:14px"><use href="#i-bolt"/></svg>이 부스 아이디어 등록
+    </button>
+    <button id="d-focus" class="btn" style="padding:11px 12px;font-size:13px;border-radius:14px" title="이 부스로 시점 이동"><svg class="ic"><use href="#i-target"/></svg></button>
+    <button id="d-go-next" class="btn btn-ghost-cy" style="padding:11px 12px;font-size:13px;border-radius:14px" title="다음 부스로 이동"><svg class="ic"><use href="#i-arrow-r"/></svg></button>
+  </div>
+</section>
+
+<!-- ======================= BOTTOM STEP RAIL ======================= -->
+<nav style="position:fixed;z-index:33;left:50%;transform:translateX(-50%);bottom:max(6px,env(safe-area-inset-bottom,0px));
+            width:min(96vw,780px);pointer-events:auto">
+  <div class="glass-deep" style="border-radius:22px;padding:8px 9px;display:flex;flex-direction:column;gap:7px">
+    <div style="position:relative;display:flex;align-items:center;gap:6px;overflow-x:auto" class="noscroll" id="rail-wrap">
+      <div id="rail-track"></div>
+      <div id="rail" style="position:relative;display:flex;align-items:center;gap:6px;padding:2px 2px"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;padding-top:7px;border-top:1px solid var(--stroke)">
+      <button id="n-prev" class="btn" style="padding:8px 10px;font-size:13px;border-radius:12px" title="이전 부스"><svg class="ic"><use href="#i-left"/></svg></button>
+      <button id="n-info" style="flex:1;min-width:0;background:none;border:none;cursor:pointer;text-align:left;padding:0 2px;color:inherit">
+        <div style="display:flex;align-items:center;gap:5px;min-width:0">
+          <span id="n-num" class="mono" style="font-size:10px;font-weight:800;color:var(--am-lit)">[01/11]</span>
+          <span id="n-id" class="mono" style="font-size:10px;font-weight:800;padding:1px 5px;border-radius:5px;background:rgba(0,210,255,.12);color:var(--cy);border:1px solid rgba(0,210,255,.3)">W2-219</span>
+        </div>
+        <div id="n-title" style="font-size:12.5px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">원프레딕트</div>
+      </button>
+      <button id="n-add" class="btn btn-am" style="padding:8px 11px;font-size:11px;border-radius:12px">
+        <svg class="ic" style="font-size:13px"><use href="#i-pen"/></svg><span class="wide-only">아이디어</span>
+      </button>
+      <button id="n-next" class="btn btn-cy" style="padding:8px 10px;font-size:13px;border-radius:12px" title="다음 부스"><svg class="ic"><use href="#i-right"/></svg></button>
+    </div>
+  </div>
+</nav>
+
+<!-- ======================= IDEA FORM MODAL ======================= -->
+<div id="modal-form" class="modal">
+  <div class="sheet glass-deep thinbar" style="max-width:560px;border-radius:26px 26px 0 0;padding:14px 15px;padding-bottom:max(16px,env(safe-area-inset-bottom,0px))">
+    <div class="grabber"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--stroke)">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        <div style="width:32px;height:32px;border-radius:12px;display:grid;place-items:center;flex:none;font-size:15px;
+             background:linear-gradient(145deg,var(--am-lit),var(--am));color:#1a1203;box-shadow:0 0 22px -5px rgba(245,158,11,.9)">
+          <svg class="ic"><use href="#i-bulb"/></svg>
+        </div>
+        <div style="min-width:0">
+          <h2 style="margin:0;font-size:14px;font-weight:900;letter-spacing:-.02em">현장 아이디어 즉시 등록</h2>
+          <p id="form-store-hint" style="margin:1px 0 0;font-size:10px;color:var(--ink-faint);font-weight:600">기기에 즉시 보관 후 서버 재연결 시 자동 동기화</p>
+        </div>
+      </div>
+      <button id="form-close" class="btn" style="width:30px;height:30px;border-radius:10px;font-size:14px;padding:0;flex:none"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+
+    <form id="idea-form" style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="cell-label" style="color:var(--cy)"><span class="mono">01</span>작성자 및 소속</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <input type="text" id="f-author" required placeholder="이름 (자동 기억)" class="field" autocomplete="name">
+          <select id="f-factory" class="field">
+            <option value="포항-CDM 1라인(마봉강 인발)">포항 · CDM 1라인</option>
+            <option value="포항-CDM 2라인(마봉강 인발)">포항 · CDM 2라인</option>
+            <option value="포항-2롤 교정/정정">포항 · 2롤 교정/정정</option>
+            <option value="포항-면취/포장/출하">포항 · 면취/포장/출하</option>
+            <option value="포항-봉강 설비보전/공무">포항 · 보전/공무</option>
+            <option value="충주-봉강 생산라인">충주 · 봉강라인</option>
+            <option value="품질보증/생관/기술">품질/생관/기술</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <div class="cell-label" style="color:var(--cy)"><span class="mono">02</span>해당 부스 / 기업명</div>
+        <input type="text" id="f-booth" required placeholder="아래 칩에서 선택하세요" class="field">
+        <div id="booth-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:7px"></div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
+          <div class="cell-label" style="color:var(--cy);margin:0"><span class="mono">03</span>CDM 공정 적용 아이디어</div>
+          <button type="button" id="btn-voice" class="btn btn-ghost-cy" style="padding:4px 9px;font-size:10px;border-radius:9px">
+            <svg class="ic" id="mic-icon" style="font-size:12px"><use href="#i-mic"/></svg><span id="voice-label">말해서 입력</span>
+          </button>
+        </div>
+        <div id="cdm-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px">
+          <button type="button" class="chip tag" data-text="CDM 인발 캐리지 감속기 진동 예지보전 센서 부착">⚙️ 인발 감속기</button>
+          <button type="button" class="chip tag" data-text="2롤 교정기 고속 회전 롤러 베어링 실시간 진단">🔄 2롤 교정기</button>
+          <button type="button" class="chip tag" data-text="4~6m 장척 봉강 번들 결속 및 캡핑 협동로봇 적용">🤖 번들 결속 로봇</button>
+          <button type="button" class="chip tag" data-text="경면 마봉강 표면 롤마크/크랙 인라인 3D 비전 검사">🔍 표면 롤마크 비전</button>
+          <button type="button" class="chip tag" data-text="봉강 랙 공장 내 자동 반송 자율주행 AMR 물류 도입">🚚 장척물 AMR</button>
+          <button type="button" class="chip tag" data-text="전기차 감속기 샤프트용 고청정 마봉강 품질 벤치마킹">⚡ 전기차 샤프트</button>
+        </div>
+        <textarea id="f-idea" rows="3" required class="field" style="line-height:1.6;resize:vertical" placeholder="태그를 누르거나 마이크로 음성 입력하세요. 예) CDM 2라인 캐리지 감속기에 진동센서 2채널 부착 후 주파수 분석"></textarea>
+      </div>
+
+      <div>
+        <div class="cell-label" style="color:var(--em)"><span class="mono">04</span>예상 기대 효과 (중복 선택)</div>
+        <div id="benefits" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <label class="bcheck"><input type="checkbox" name="benefit" value="장척 봉강(4~6m) 취급 끼임 차단"><span>🛡️ 장척물 취급 안전</span></label>
+          <label class="bcheck"><input type="checkbox" name="benefit" value="CDM 캐리지·교정기 돌발정지 제로" checked><span>⚙️ 설비 돌발정지 방지</span></label>
+          <label class="bcheck"><input type="checkbox" name="benefit" value="마봉강 표면 롤마크/결함 전수 검출"><span>🔍 롤마크/결함 검출</span></label>
+          <label class="bcheck"><input type="checkbox" name="benefit" value="육각 번들링·스트랩 결속 무인화"><span>🤖 번들 결속 자동화</span></label>
+        </div>
+      </div>
+
+      <button type="submit" id="btn-submit" class="btn btn-am" style="padding:13px;font-size:13px;border-radius:15px;width:100%">
+        <svg class="ic" style="font-size:15px"><use href="#i-save"/></svg><span id="submit-label">아이디어 저장</span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ======================= IDEAS BOARD MODAL ======================= -->
+<div id="modal-board" class="modal">
+  <div class="sheet glass-deep thinbar" style="max-width:720px;border-radius:26px 26px 0 0;padding:14px 15px;padding-bottom:max(16px,env(safe-area-inset-bottom,0px));display:flex;flex-direction:column">
+    <div class="grabber"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--stroke);flex:none">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        <div style="width:32px;height:32px;border-radius:12px;display:grid;place-items:center;flex:none;font-size:15px;
+             background:rgba(245,158,11,.16);color:var(--am-lit);border:1px solid rgba(245,158,11,.35)">
+          <svg class="ic"><use href="#i-db"/></svg>
+        </div>
+        <div style="min-width:0">
+          <div style="display:flex;align-items:center;gap:6px">
+            <h2 style="margin:0;font-size:14px;font-weight:900;letter-spacing:-.02em">CDM 참관 아이디어 DB</h2>
+            <span id="board-count" class="mono" style="padding:1px 6px;border-radius:99px;background:var(--am);color:#1a1203;font-size:9.5px;font-weight:800">0건</span>
+          </div>
+          <p id="board-store-hint" style="margin:1px 0 0;font-size:10px;color:var(--ink-faint);font-weight:600">기기 보관함 + 서버 DB 통합 목록</p>
+        </div>
+      </div>
+      <button id="board-close" class="btn" style="width:30px;height:30px;border-radius:10px;font-size:14px;padding:0;flex:none"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div style="margin:11px 0;padding:11px 12px;border-radius:16px;background:rgba(148,163,184,.055);border:1px solid var(--stroke);flex:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px">
+        <span style="font-size:11px;font-weight:700;color:var(--ink-dim);display:flex;align-items:center;gap:5px">
+          <svg class="ic" style="font-size:13px;color:var(--am-lit)"><use href="#i-flag"/></svg>추천 부스 11개 작성 달성도
+        </span>
+        <span id="board-progress-text" class="mono" style="font-size:10.5px;font-weight:800;color:var(--am-lit)">0 / 11</span>
+      </div>
+      <div style="height:7px;border-radius:99px;background:rgba(2,6,16,.8);overflow:hidden;border:1px solid var(--stroke)">
+        <div id="board-progress-bar" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#00D2FF,#FBBF24);transition:width .6s cubic-bezier(.16,1,.3,1);box-shadow:0 0 14px rgba(0,210,255,.6)"></div>
+      </div>
+      <div id="board-step-strip" style="display:flex;gap:3px;margin-top:7px"></div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;flex:none">
+      <button id="b-copy" class="btn btn-ghost-cy" style="padding:7px 10px;font-size:11px;border-radius:12px"><svg class="ic" style="font-size:12px"><use href="#i-copy"/></svg>카톡/보고서 복사</button>
+      <button id="b-csv" class="btn btn-ghost-em" style="padding:7px 10px;font-size:11px;border-radius:12px"><svg class="ic" style="font-size:12px"><use href="#i-sheet"/></svg>엑셀(CSV)</button>
+      <button id="b-sync" class="btn" style="padding:7px 10px;font-size:11px;border-radius:12px"><svg class="ic" id="sync-icon" style="font-size:12px"><use href="#i-sync"/></svg>동기화</button>
+      <button id="b-add" class="btn btn-am" style="padding:7px 10px;font-size:11px;border-radius:12px;margin-left:auto"><svg class="ic" style="font-size:12px"><use href="#i-plus"/></svg>추가</button>
+    </div>
+
+    <div id="board-list" class="thinbar" style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;min-height:150px;max-height:46dvh;padding-right:3px"></div>
+  </div>
+</div>
+
+<!-- ======================= TOAST ======================= -->
+<div id="toast" class="glass-deep hide" style="position:fixed;z-index:80;left:50%;transform:translateX(-50%);
+     top:max(14px,calc(env(safe-area-inset-top,0px) + 14px));padding:10px 15px;border-radius:16px;display:flex;align-items:center;gap:8px;
+     max-width:min(92vw,420px);pointer-events:none">
+  <svg class="ic" id="toast-icon" style="font-size:15px;color:var(--em)"><use href="#i-check"/></svg>
+  <span id="toast-text" style="font-size:12px;font-weight:700;letter-spacing:-.01em">알림</span>
+</div>
+
+<script>
+/* =========================================================================
+   SeAH Special Steel · CDM 봉강생산팀 — FIX 2026 3D Navigator
+   High-Tech Industrial Digital Twin build
+   ========================================================================= */
+"use strict";
+
+/* ---------------------------- BOOTH DATASET ---------------------------- */
+const BOOTH_DATA = [
+  { step:1,  id:"W2-219", hallCode:"서관 ITCE 2홀",  company:"원프레딕트",                    shortName:"원프레딕트",    hall:"ITCE 서관 2홀",  trackName:"T3. AI 예지보전",      color:0xa855f7, x:-42, z:-18, w:15, d:13, h:4.8, process:"CDM 메인 인발 캐리지 감속기 & 2롤 교정기 롤러 베어링 상태진단", highlight:"국내 1위 산업 AI 예지보전 GuardiOne. 딥러닝 기반 베어링 편마모/기어 손상 사전 예측" },
+  { step:2,  id:"W2-198", hallCode:"서관 ITCE 2홀",  company:"주식회사 그룸깃다",              shortName:"그룸깃다",      hall:"ITCE 서관 2홀",  trackName:"T3. 스마트팩토리 AI",  color:0xa855f7, x:-55, z:2,   w:12, d:11, h:4.2, process:"마봉강 치수 & 비파괴 검사(ECT) 데이터 인라인 Edge AI 수집", highlight:"구글 클라우드 파트너 기반 스마트팩토리 데이터 플랫폼 및 초경량 Edge 분석" },
+  { step:3,  id:"W1-200", hallCode:"서관 ITCE 1홀",  company:"한국기계연구원 대경융합연구본부", shortName:"한국기계연구원", hall:"ITCE 서관 1홀",  trackName:"T4. 금속기계 소성자동화", color:0xf59e0b, x:-18, z:0,  w:13, d:11, h:4.0, process:"장척 봉강 자동 정렬 및 소성가공 공정 지능화 기계 연구", highlight:"금속 소성가공 기계 및 스마트 제조 자동화 국책 실증 연구" },
+  { step:4,  id:"W3-131", hallCode:"서관 ROBEX 3홀", company:"HD현대로보틱스",                 shortName:"HD현대로봇",    hall:"ROBEX 서관 3홀", trackName:"T1. 고가반하중 핸들링", color:0x3b82f6, x:42, z:-8,  w:18, d:16, h:6.2, process:"4~6m 장척 봉강 번들(수 톤) 로딩/언로딩 및 크레인 없는 자동 이송", highlight:"Heavy Payload 다관절 로봇(가반하중 500kg~1톤급), 롱바 특수 그리퍼" },
+  { step:5,  id:"W3-141", hallCode:"서관 ROBEX 3홀", company:"두산로보틱스",                   shortName:"두산로보틱스",  hall:"ROBEX 서관 3홀", trackName:"T2. 협동로봇·포장",    color:0x10b981, x:42, z:-35, w:18, d:16, h:5.8, process:"CDM 후단 육각 번들 자동 밴딩(Strap 결속), 끝단 캡 삽입, 라벨 태깅", highlight:"고가반하중 H/P시리즈 협동로봇, 토크 센서 기반 최고 등급 안전 보호" },
+  { step:6,  id:"W3-331", hallCode:"서관 ROBEX 3홀", company:"아이엠로보틱스(주)",             shortName:"아이엠로보틱스", hall:"ROBEX 서관 3홀", trackName:"T1. 중량물 AMR 물류",  color:0x3b82f6, x:18, z:-10, w:13, d:14, h:4.8, process:"CDM 인발 후 열처리 또는 교정 공정 간 봉강 랙 무인 AMR 이송", highlight:"고중량 자율이송로봇(AMR), 공장 바닥 요철 및 금속 플레이트 주행 제어" },
+  { step:7,  id:"W3-231", hallCode:"서관 ROBEX 3홀", company:"브라토(주)",                     shortName:"브라토",        hall:"ROBEX 서관 3홀", trackName:"T1. 특수 그리퍼/기구", color:0x3b82f6, x:28, z:8,   w:12, d:11, h:4.2, process:"2롤 교정기 및 면취기 전후단 봉강 정밀 이송 롤러 및 고하중 클램핑 그리퍼", highlight:"흠집 없는 파지 메커니즘 및 대형 서보 전동 그리퍼" },
+  { step:8,  id:"W3-201", hallCode:"서관 ROBEX 3홀", company:"에이치알티로보틱스",             shortName:"HRT로보틱스",   hall:"ROBEX 서관 3홀", trackName:"T4. AI 비전 검사",     color:0xf59e0b, x:25, z:38,  w:14, d:9,  h:4.2, process:"마봉강 표면 롤 마크, 미세 스크래치, 헤어라인 크랙 인라인 비전 검사", highlight:"고속 3D 레이저 프로파일러 + 딥러닝 결함 검출 로봇 셀" },
+  { step:9,  id:"W3-641", hallCode:"서관 ROBEX 3홀", company:"한국로봇산업진흥원",             shortName:"로봇진흥원",    hall:"ROBEX 서관 3홀", trackName:"T4. 정부지원 바우처",  color:0xf59e0b, x:-2, z:-40, w:15, d:13, h:4.8, process:"봉강 CDM 라인 중량물 고위험 공정 자동화 국비 50~70% 보조금 사업 상담", highlight:"국내 제조기업 로봇 실증 보급사업 총괄 전담기관 현장 데스크" },
+  { step:10, id:"E4-210", hallCode:"동관 DIFA 4홀",  company:"BYD (비야디)",                   shortName:"BYD",           hall:"DIFA 동관 4홀",  trackName:"T5. 중국 EV 벤치마킹", color:0xef4444, x:108, z:-25, w:20, d:18, h:6.0, process:"전기차 감속기 샤프트용 고청정 마봉강 & 블레이드 배터리 볼트 강재 수요 파악", highlight:"글로벌 1위 EV 제조사. e-Platform 3.0 일체화 구동모터 샤프트 전시" },
+  { step:11, id:"E4-232", hallCode:"동관 DIFA 4홀",  company:"지커 (ZEEKR)",                   shortName:"지커ZEEKR",     hall:"DIFA 동관 4홀",  trackName:"T5. 중국 EV 벤치마킹", color:0x06b6d4, x:108, z:20,  w:19, d:16, h:5.5, process:"대형 기가캐스팅 차체 도입에 따른 스티어링 랙바, 타이로드 마봉강 설계 변화 대응", highlight:"지리자동차 프리미엄 EV 브랜드. SEA 전기차 플랫폼 및 기가캐스팅 시연" }
+];
+const ENTRANCE = { x:-25, z:52 };
+const TOTAL = BOOTH_DATA.length;
+
+/* ---------------------------- STATE ---------------------------- */
+let currentIndex = 0;
+let ideas = [];                 // unified list
+let linkMode = 'local';         // 'server' | 'streamlit' | 'local'
+let scene, camera, renderer, controls, raycaster, pointerVec;
+let boothGroups = [], pickTargets = [], routeGroup = null, flowPoints = null, flowCurve = null;
+let floorMat = null, tubeMat = null;
+let isAutoTour = false, autoTourTimer = null;
+let dragged = false, downPos = {x:0,y:0};
+const clock = (typeof THREE !== 'undefined') ? new THREE.Clock() : null;
+
+/* ---------------------------- AUDIO (Web Audio API synth) ---------------------------- */
+const Sfx = {
+  ctx:null, master:null, enabled:true,
+  boot(){
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { this.enabled = false; return; }
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.5;
+      this.master.connect(this.ctx.destination);
+    } catch(e){ this.enabled = false; }
+  },
+  tone(freq, dur, type, gain, slideTo){
+    if (!this.enabled) return;
+    this.boot();
+    if (!this.ctx) return;
+    try {
+      const t = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const flt = this.ctx.createBiquadFilter();
+      flt.type = 'lowpass'; flt.frequency.value = 5200; flt.Q.value = 0.8;
+      osc.type = type || 'square';
+      osc.frequency.setValueAtTime(freq, t);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain || 0.05, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(flt); flt.connect(g); g.connect(this.master);
+      osc.start(t); osc.stop(t + dur + 0.02);
+    } catch(e){}
+  },
+  click(){ this.tone(1420, 0.045, 'square', 0.035, 940); },
+  nav(){ this.tone(560, 0.055, 'triangle', 0.055, 1180); setTimeout(()=>this.tone(1560, 0.05, 'sine', 0.035), 48); },
+  save(){ [660, 990, 1320].forEach((f,i)=>setTimeout(()=>this.tone(f, 0.13, 'triangle', 0.05), i*68)); },
+  warn(){ this.tone(300, 0.14, 'sawtooth', 0.045, 170); },
+  sweep(){ this.tone(220, 0.42, 'sine', 0.03, 1760); }
+};
+let userTouched = false;
+function haptic(p){ if (!userTouched) return; try { if (navigator.vibrate) navigator.vibrate(p); } catch(e){} }
+function fx(kind, vib){ try { Sfx[kind] && Sfx[kind](); } catch(e){} if (vib !== 0) haptic(vib || 8); }
+
+/* ---------------------------- SMALL UTILS ---------------------------- */
+const $ = id => document.getElementById(id);
+const hex = n => '#' + n.toString(16).padStart(6,'0');
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function nowStamp(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+function roundRectPath(ctx, x, y, w, h, r){
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+  ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y); ctx.closePath();
+}
+
+/* ========================================================================
+   THREE.JS — CYBERNETIC INDUSTRIAL DIGITAL TWIN SCENE
+   ======================================================================== */
+function initThree(){
+  const canvas = $('webgl-canvas');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050811);
+  scene.fog = new THREE.FogExp2(0x050811, 0.0022);
+
+  camera = new THREE.PerspectiveCamera(fovForViewport(), window.innerWidth/window.innerHeight, 0.5, 1400);
+  camera.position.set(24, 250, 300);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (renderer.outputEncoding !== undefined) renderer.outputEncoding = THREE.sRGBEncoding;
+
+  if (typeof THREE.OrbitControls === 'function') {
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.085;
+    controls.rotateSpeed = 0.62;
+    controls.maxPolarAngle = Math.PI/2 - 0.045;
+    controls.minDistance = 16;
+    controls.maxDistance = 560;
+    controls.target.set(14, 0, 0);
+  }
+
+  raycaster = new THREE.Raycaster();
+  pointerVec = new THREE.Vector2();
+
+  buildLights();
+  buildFloor();
+  buildZones();
+  buildBooths();
+  buildRoute();
+  bindCanvasPointer();
+
+  window.addEventListener('resize', onResize, { passive:true });
+}
+
+function fovForViewport(){ return window.innerWidth < 700 ? 58 : 46; }
+function onResize(){
+  if (!camera || !renderer) return;
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.fov = fovForViewport();
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function buildLights(){
+  scene.add(new THREE.AmbientLight(0x9fc4ff, 0.42));
+  const hemi = new THREE.HemisphereLight(0x5fd4ff, 0x050811, 0.78);
+  hemi.position.set(0, 120, 0); scene.add(hemi);
+  const key = new THREE.DirectionalLight(0xdff2ff, 0.95); key.position.set(60, 110, 70); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x2563eb, 0.65); rim.position.set(-90, 50, -70); scene.add(rim);
+  const amber = new THREE.PointLight(0xf59e0b, 1.5, 150, 2); amber.position.set(0, 34, 10); scene.add(amber);
+  const cyan  = new THREE.PointLight(0x00d2ff, 1.4, 190, 2); cyan.position.set(95, 36, -10); scene.add(cyan);
+}
+
+/* ---- Metallic reflective deck + cybernetic pulse grid shader ---- */
+function buildFloor(){
+  const deck = new THREE.Mesh(
+    new THREE.PlaneGeometry(460, 320),
+    new THREE.MeshStandardMaterial({ color:0x070b14, metalness:0.92, roughness:0.28 })
+  );
+  deck.rotation.x = -Math.PI/2; deck.position.y = -0.02; scene.add(deck);
+
+  floorMat = new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    uniforms:{ uTime:{ value:0 }, uCy:{ value:new THREE.Color(0x00d2ff) }, uAm:{ value:new THREE.Color(0xf59e0b) } },
+    vertexShader:[
+      'varying vec3 vPos;',
+      'void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }'
+    ].join('\n'),
+    fragmentShader:[
+      'uniform float uTime; uniform vec3 uCy; uniform vec3 uAm; varying vec3 vPos;',
+      'float gridLine(vec2 p, float s, float t){',
+      '  vec2 f = abs(fract(p/s - 0.5) - 0.5);',
+      '  return 1.0 - smoothstep(0.0, t, min(f.x, f.y));',
+      '}',
+      'void main(){',
+      '  vec2 p = vPos.xy;',
+      '  float dist = length(p - vec2(14.0, 0.0));',
+      '  float fine  = gridLine(p, 8.0, 0.018);',
+      '  float major = gridLine(p, 40.0, 0.012);',
+      '  float fade  = 1.0 - smoothstep(55.0, 215.0, dist);',
+      '  float pulse = sin(dist * 0.085 - uTime * 1.25);',
+      '  pulse = smoothstep(0.86, 1.0, pulse);',
+      '  float sweep = sin(atan(p.y, p.x) * 1.0 - uTime * 0.5);',
+      '  sweep = smoothstep(0.975, 1.0, sweep);',
+      '  vec3 col = uCy * (fine * 0.16 + major * 0.42);',
+      '  col += uCy * pulse * 0.30;',
+      '  col += uAm * sweep * 0.22;',
+      '  float a = (fine * 0.22 + major * 0.5 + pulse * 0.4 + sweep * 0.3) * fade;',
+      '  gl_FragColor = vec4(col, clamp(a, 0.0, 0.92));',
+      '}'
+    ].join('\n')
+  });
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(460, 320), floorMat);
+  grid.rotation.x = -Math.PI/2; grid.position.y = 0.05; scene.add(grid);
+}
+
+/* ---- Hall zone platforms with neon perimeter ---- */
+function buildZones(){
+  const zones = [
+    { x:-40, z:-10, w:74, d:96,  c:0x7c3aed },
+    { x:30,  z:-5,  w:72, d:110, c:0x2563eb },
+    { x:115, z:0,   w:56, d:104, c:0x06b6d4 }
+  ];
+  zones.forEach(zn => {
+    const pad = new THREE.Mesh(
+      new THREE.BoxGeometry(zn.w, 0.35, zn.d),
+      new THREE.MeshStandardMaterial({ color:0x0a1020, metalness:0.72, roughness:0.42, transparent:true, opacity:0.9 })
+    );
+    pad.position.set(zn.x, 0.17, zn.z); scene.add(pad);
+    const edge = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(zn.w, 0.36, zn.d)),
+      new THREE.LineBasicMaterial({ color:zn.c, transparent:true, opacity:0.55 })
+    );
+    edge.position.set(zn.x, 0.18, zn.z); scene.add(edge);
+  });
+  const bridge = new THREE.Mesh(
+    new THREE.BoxGeometry(28, 0.3, 16),
+    new THREE.MeshStandardMaterial({ color:0x0b1a2e, metalness:0.9, roughness:0.3 })
+  );
+  bridge.position.set(80, 0.15, -2); scene.add(bridge);
+}
+
+/* ---- Glass + aluminium kiosk pods with neon edgework ---- */
+function buildBooths(){
+  boothGroups = []; pickTargets = [];
+  BOOTH_DATA.forEach((b, idx) => {
+    const g = new THREE.Group();
+    g.position.set(b.x, 0, b.z);
+    const col = new THREE.Color(b.color);
+
+    const deckGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(b.w * 1.55, b.d * 1.55),
+      new THREE.ShaderMaterial({
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+        uniforms:{ uTime:{ value:Math.random()*10 }, uCol:{ value:col.clone() } },
+        vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+        fragmentShader:[
+          'uniform float uTime; uniform vec3 uCol; varying vec2 vUv;',
+          'void main(){',
+          '  float d = length(vUv - 0.5) * 2.0;',
+          '  float halo = 1.0 - smoothstep(0.25, 1.0, d);',
+          '  float ring = smoothstep(0.02, 0.0, abs(d - (0.45 + 0.4*abs(sin(uTime*0.6)))));',
+          '  gl_FragColor = vec4(uCol, halo*0.22 + ring*0.5);',
+          '}'
+        ].join('\n')
+      })
+    );
+    deckGlow.rotation.x = -Math.PI/2; deckGlow.position.y = 0.09; g.add(deckGlow);
+
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(b.w, 0.85, b.d),
+      new THREE.MeshStandardMaterial({ color:0x121a2b, metalness:0.95, roughness:0.32 })
+    );
+    base.position.y = 0.42; g.add(base);
+
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(b.w*0.84, b.h, b.d*0.84),
+      new THREE.MeshPhysicalMaterial({
+        color:0x0a1426, metalness:0.28, roughness:0.06, transparent:true, opacity:0.5,
+        clearcoat:1.0, clearcoatRoughness:0.04, side:THREE.DoubleSide
+      })
+    );
+    glass.position.y = b.h/2 + 0.85;
+    glass.userData = { index:idx, booth:b };
+    g.add(glass); pickTargets.push(glass);
+
+    const core = new THREE.Mesh(
+      new THREE.BoxGeometry(b.w*0.34, b.h*0.66, b.d*0.34),
+      new THREE.MeshStandardMaterial({ color:0x060c18, metalness:0.9, roughness:0.22, emissive:col, emissiveIntensity:0.16 })
+    );
+    core.position.y = b.h*0.33 + 0.85; g.add(core);
+
+    const neonMat = new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.95 });
+    const hx = b.w*0.42, hz = b.d*0.42;
+    [[-hx,-hz],[hx,-hz],[-hx,hz],[hx,hz]].forEach(c => {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.28, b.h+0.3, 0.28), neonMat);
+      bar.position.set(c[0], b.h/2 + 0.85, c[1]); g.add(bar);
+    });
+    [[0, -hz],[0, hz]].forEach(c => {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(b.w*0.845, 0.2, 0.2), neonMat);
+      bar.position.set(c[0], b.h + 0.95, c[1]); g.add(bar);
+    });
+    [[-hx, 0],[hx, 0]].forEach(c => {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, b.d*0.845), neonMat);
+      bar.position.set(c[0], b.h + 0.95, c[1]); g.add(bar);
+    });
+
+    const cap = new THREE.Mesh(
+      new THREE.BoxGeometry(b.w*0.9, 0.42, b.d*0.9),
+      new THREE.MeshStandardMaterial({ color:0x19233a, metalness:0.96, roughness:0.24 })
+    );
+    cap.position.y = b.h + 1.1; g.add(cap);
+
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 1.5, 3.4, 14, 1, true),
+      new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.14, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, depthWrite:false })
+    );
+    beam.position.y = b.h + 3.0; g.add(beam);
+
+    const sign = makeHudSign(b);
+    sign.position.set(0, b.h + 6.3, 0); g.add(sign);
+
+    const beacon = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.95, 0),
+      new THREE.MeshBasicMaterial({ color:0xfbbf24 })
+    );
+    beacon.position.set(0, b.h + 9.6, 0); g.add(beacon);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(b.w*0.62, b.w*0.68, 56),
+      new THREE.MeshBasicMaterial({ color:0x00d2ff, transparent:true, opacity:0, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false })
+    );
+    ring.rotation.x = -Math.PI/2; ring.position.y = 0.16; g.add(ring);
+
+    g.userData = { index:idx, booth:b, beacon, ring, beaconY:b.h + 9.6, deckGlow, core, neonMat, selected:false };
+    scene.add(g); boothGroups.push(g);
+  });
+}
+
+/* ---- Holographic glass HUD sign (canvas texture sprite) ---- */
+function makeHudSign(b){
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 384;
+  const c = cv.getContext('2d');
+  const accent = hex(b.color);
+
+  const grad = c.createLinearGradient(0, 0, 0, 384);
+  grad.addColorStop(0, 'rgba(10,20,38,0.94)');
+  grad.addColorStop(1, 'rgba(4,8,18,0.88)');
+  roundRectPath(c, 14, 14, 996, 356, 34); c.fillStyle = grad; c.fill();
+
+  c.save(); roundRectPath(c, 14, 14, 996, 356, 34); c.clip();
+  c.fillStyle = 'rgba(150,215,255,0.028)';
+  for (let y = 14; y < 370; y += 7) c.fillRect(14, y, 996, 2);
+  const sheen = c.createLinearGradient(0, 0, 1024, 384);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.09)');
+  sheen.addColorStop(0.38, 'rgba(255,255,255,0.0)');
+  c.fillStyle = sheen; c.fillRect(0, 0, 1024, 384);
+  c.restore();
+
+  roundRectPath(c, 14, 14, 996, 356, 34);
+  c.strokeStyle = accent; c.lineWidth = 5; c.globalAlpha = 0.95; c.stroke(); c.globalAlpha = 1;
+  roundRectPath(c, 24, 24, 976, 336, 28);
+  c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = 2; c.stroke();
+
+  c.strokeStyle = '#00D2FF'; c.lineWidth = 6; c.lineCap = 'round';
+  [[46,78,46,46,98,46],[978,78,978,46,926,46],[46,306,46,338,98,338],[978,306,978,338,926,338]].forEach(p => {
+    c.beginPath(); c.moveTo(p[0],p[1]); c.lineTo(p[2],p[3]); c.lineTo(p[4],p[5]); c.stroke();
+  });
+
+  c.fillStyle = '#FBBF24';
+  c.font = "800 62px 'JetBrains Mono', ui-monospace, monospace";
+  c.shadowColor = 'rgba(251,191,36,0.85)'; c.shadowBlur = 26;
+  c.fillText('[' + b.id + ']', 70, 136);
+  c.shadowBlur = 0;
+
+  c.fillStyle = 'rgba(0,210,255,0.95)';
+  c.font = "800 92px 'JetBrains Mono', ui-monospace, monospace";
+  c.textAlign = 'right';
+  c.shadowColor = 'rgba(0,210,255,0.8)'; c.shadowBlur = 24;
+  c.fillText(String(b.step).padStart(2,'0'), 952, 142);
+  c.shadowBlur = 0; c.textAlign = 'left';
+
+  c.strokeStyle = 'rgba(255,255,255,0.16)'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(70, 182); c.lineTo(952, 182); c.stroke();
+
+  c.fillStyle = '#FFFFFF';
+  c.font = "900 76px 'Pretendard Variable','Pretendard','Noto Sans KR',sans-serif";
+  c.shadowColor = 'rgba(0,0,0,0.9)'; c.shadowBlur = 10;
+  let name = b.shortName;
+  while (c.measureText(name).width > 880 && name.length > 3) name = name.slice(0, -1);
+  c.fillText(name, 70, 262);
+  c.shadowBlur = 0;
+
+  c.fillStyle = 'rgba(148,163,184,0.92)';
+  c.font = "700 40px 'Pretendard Variable','Pretendard','Noto Sans KR',sans-serif";
+  c.fillText(b.hallCode + '  ·  ' + b.trackName, 70, 324);
+
+  const tex = new THREE.CanvasTexture(cv);
+  if (tex.anisotropy !== undefined && renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false }));
+  sp.scale.set(17, 6.4, 1);
+  return sp;
+}
+
+/* ---- Fibre-optic neon route: flowing tube shader + travelling light packets ---- */
+function buildRoute(){
+  routeGroup = new THREE.Group();
+  const pts = [new THREE.Vector3(ENTRANCE.x, 0.9, ENTRANCE.z)];
+  BOOTH_DATA.forEach(b => pts.push(new THREE.Vector3(b.x, 0.9, b.z)));
+  flowCurve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.25);
+
+  tubeMat = new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+    uniforms:{ uTime:{ value:0 }, uA:{ value:new THREE.Color(0x0b4f80) }, uB:{ value:new THREE.Color(0xa8f0ff) } },
+    vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader:[
+      'uniform float uTime; uniform vec3 uA; uniform vec3 uB; varying vec2 vUv;',
+      'void main(){',
+      '  float t = fract(vUv.x * 5.0 - uTime * 0.42);',
+      '  float head = smoothstep(0.0, 0.035, t) * (1.0 - smoothstep(0.035, 0.46, t));',
+      '  float body = 0.22 + 0.1 * sin(vUv.x * 60.0 - uTime * 3.0);',
+      '  vec3 col = mix(uA, uB, head);',
+      '  gl_FragColor = vec4(col, clamp(body + head * 0.95, 0.0, 1.0));',
+      '}'
+    ].join('\n')
+  });
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(flowCurve, 420, 0.42, 10, false), tubeMat);
+  routeGroup.add(tube);
+
+  const dotCv = document.createElement('canvas'); dotCv.width = dotCv.height = 64;
+  const dc = dotCv.getContext('2d');
+  const rg = dc.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, 'rgba(255,255,255,1)');
+  rg.addColorStop(0.3, 'rgba(160,240,255,0.85)');
+  rg.addColorStop(1, 'rgba(0,160,255,0)');
+  dc.fillStyle = rg; dc.fillRect(0, 0, 64, 64);
+
+  const N = 54;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N*3), 3));
+  flowPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+    size:3.1, map:new THREE.CanvasTexture(dotCv), transparent:true, depthWrite:false,
+    blending:THREE.AdditiveBlending, sizeAttenuation:true
+  }));
+  flowPoints.userData = { n:N };
+  routeGroup.add(flowPoints);
+
+  const gate = new THREE.Mesh(
+    new THREE.TorusGeometry(3.4, 0.22, 10, 40),
+    new THREE.MeshBasicMaterial({ color:0x10b981 })
+  );
+  gate.position.set(ENTRANCE.x, 3.4, ENTRANCE.z); routeGroup.add(gate);
+  routeGroup.userData = { gate };
+  scene.add(routeGroup);
+}
+
+/* ---- Picking ---- */
+function bindCanvasPointer(){
+  const el = renderer.domElement;
+  el.addEventListener('pointerdown', e => { dragged = false; downPos = { x:e.clientX, y:e.clientY }; }, { passive:true });
+  el.addEventListener('pointermove', e => {
+    if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 9) dragged = true;
+  }, { passive:true });
+  el.addEventListener('pointerup', e => {
+    if (dragged) return;
+    const r = el.getBoundingClientRect();
+    pointerVec.x = ((e.clientX - r.left)/r.width) * 2 - 1;
+    pointerVec.y = -((e.clientY - r.top)/r.height) * 2 + 1;
+    raycaster.setFromCamera(pointerVec, camera);
+    const hit = raycaster.intersectObjects(pickTargets, false);
+    if (hit.length) { stopTour(); fx('nav', 14); selectStep(hit[0].object.userData.index, true); }
+  }, { passive:true });
+}
+
+/* ---- Render loop ---- */
+function animate(){
+  requestAnimationFrame(animate);
+  if (!renderer || !scene || !camera) return;
+  const t = clock ? clock.getElapsedTime() : 0;
+
+  if (floorMat) floorMat.uniforms.uTime.value = t;
+  if (tubeMat)  tubeMat.uniforms.uTime.value = t;
+
+  boothGroups.forEach((g, i) => {
+    const u = g.userData;
+    if (u.beacon) {
+      u.beacon.position.y = u.beaconY + Math.sin(t*2.6 + i*0.9) * 0.55;
+      u.beacon.rotation.y = t * 1.25; u.beacon.rotation.x = t * 0.5;
+    }
+    if (u.deckGlow) u.deckGlow.material.uniforms.uTime.value = t + i;
+    if (u.ring) {
+      const on = u.selected;
+      const target = on ? 0.55 + Math.sin(t*3.4)*0.25 : 0;
+      u.ring.material.opacity += (target - u.ring.material.opacity) * 0.14;
+      u.ring.rotation.z = t * 0.6;
+      const s = on ? 1 + Math.sin(t*2.2)*0.045 : 1;
+      u.ring.scale.set(s, s, 1);
+    }
+    if (u.core) {
+      const target = u.selected ? 0.9 : 0.16;
+      u.core.material.emissiveIntensity += (target - u.core.material.emissiveIntensity) * 0.1;
+    }
+  });
+
+  if (flowPoints && flowCurve) {
+    const n = flowPoints.userData.n;
+    const arr = flowPoints.geometry.attributes.position.array;
+    for (let i = 0; i < n; i++) {
+      let u = (i / n + t * 0.045) % 1;
+      const p = flowCurve.getPointAt(u);
+      arr[i*3] = p.x; arr[i*3+1] = p.y + 0.35; arr[i*3+2] = p.z;
+    }
+    flowPoints.geometry.attributes.position.needsUpdate = true;
+  }
+  if (routeGroup && routeGroup.userData.gate) {
+    routeGroup.userData.gate.rotation.z = t * 0.8;
+    routeGroup.userData.gate.rotation.x = Math.PI/2 + Math.sin(t*0.6)*0.25;
+  }
+
+  if (controls) controls.update();
+  renderer.render(scene, camera);
+}
+
+/* ---- Camera moves ---- */
+let gsapTuned = false;
+function flyTo(px, py, pz, tx, ty, tz, dur){
+  if (!camera) return;
+  if (window.gsap && !gsapTuned) { try { gsap.ticker.lagSmoothing(0); } catch(e){} gsapTuned = true; }
+  const d = dur || 0.95;
+  if (window.gsap) {
+    gsap.to(camera.position, { x:px, y:py, z:pz, duration:d, ease:'power3.inOut' });
+    if (controls) gsap.to(controls.target, { x:tx, y:ty, z:tz, duration:d, ease:'power3.inOut' });
+  } else {
+    camera.position.set(px, py, pz);
+    if (controls) controls.target.set(tx, ty, tz);
+  }
+}
+/* 세로로 긴 모바일 화면은 수평 화각이 매우 좁다. 폭/높이 양쪽을 담는 거리를 계산해 프레이밍한다. */
+function frameDistance(needW, needH, pad){
+  if (!camera) return 120;
+  const vF = camera.fov * Math.PI / 180;
+  const hF = 2 * Math.atan(Math.tan(vF/2) * camera.aspect);
+  const dW = (needW/2) / Math.tan(hF/2);
+  const dH = (needH/2) / Math.tan(vF/2);
+  return Math.max(dW, dH) * (pad || 1.15);
+}
+function visibleHeightAt(d){ return 2 * d * Math.tan(camera.fov * Math.PI / 360); }
+
+function viewIso(){
+  const d = Math.min(frameDistance(205, 130, 1.06), 540);
+  const k = d / Math.sqrt(0.09 + 0.46 + 0.62);
+  flyTo(14 + 0.30*k, 0.68*k, 0.79*k, 14, 0, 0, 1.25);
+}
+function viewTop(){
+  const d = Math.min(frameDistance(205, 130, 1.06), 540);
+  flyTo(14, d, 0.8, 14, 0, 0, 1.25);
+}
+function focusBooth(b){
+  const narrow = window.innerWidth < 860;
+  const d = Math.max(frameDistance(Math.max(b.w, 24), b.h + 14, 1.2), 28);
+  const k = d / Math.sqrt(0.30*0.30 + 0.70*0.70 + 0.95*0.95);
+  // 하단 시트/도크가 가리는 만큼 타깃을 내려 부스를 화면 위쪽에 배치
+  const dropY = narrow ? visibleHeightAt(d) * 0.21 : 0;
+  const shiftX = narrow ? 0 : -visibleHeightAt(d) * camera.aspect * 0.11;
+  flyTo(b.x + 0.30*k, b.h/2 + 0.70*k, b.z + 0.95*k, b.x + shiftX, b.h/2 - dropY, b.z, 0.95);
+}
+</script>
+
+<script>
+/* ========================================================================
+   HYBRID PERSISTENCE  —  Server API  ⇄  Streamlit bridge  ⇄  localStorage
+   ======================================================================== */
+const LS_IDEAS = 'SEAH_FIX2026_IDEAS_V2';
+const LS_USER  = 'SEAH_USER';
+let memoryFallback = { ideas:null, user:null };
+
+function lsGet(key){
+  try { return localStorage.getItem(key); }
+  catch(e){ return key === LS_IDEAS ? memoryFallback.ideas : memoryFallback.user; }
+}
+function lsSet(key, val){
+  try { localStorage.setItem(key, val); }
+  catch(e){ if (key === LS_IDEAS) memoryFallback.ideas = val; else memoryFallback.user = val; }
+}
+function loadLocalIdeas(){
+  try { const raw = lsGet(LS_IDEAS); const arr = raw ? JSON.parse(raw) : []; return Array.isArray(arr) ? arr : []; }
+  catch(e){ return []; }
+}
+function saveLocalIdeas(){ lsSet(LS_IDEAS, JSON.stringify(ideas)); }
+
+function mergeIdeas(incoming){
+  if (!Array.isArray(incoming)) return false;
+  const seen = new Set(ideas.map(i => i.uuid));
+  let added = 0;
+  incoming.forEach(row => {
+    if (!row || !row.uuid) return;
+    if (seen.has(row.uuid)) {
+      const cur = ideas.find(i => i.uuid === row.uuid);
+      if (cur && cur.pending) { cur.pending = false; added++; }
+    } else {
+      seen.add(row.uuid);
+      ideas.push(Object.assign({}, row, { pending:false }));
+      added++;
+    }
+  });
+  ideas.sort((a,b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  if (added) saveLocalIdeas();
+  return added > 0;
+}
+
+/* ---------- Streamlit custom-component bridge ---------- */
+const Bridge = {
+  inFrame: (function(){ try { return window.self !== window.top; } catch(e){ return true; } })(),
+  handshakeDone:false,
+  post(msg){ try { window.parent.postMessage(Object.assign({ isStreamlitMessage:true }, msg), '*'); } catch(e){} },
+  announce(){ if (!this.inFrame) return; this.post({ type:'streamlit:componentReady', apiVersion:1 }); },
+  setHeight(){
+    if (!this.inFrame) return;
+    let h = 760;
+    try { h = Math.max(560, (window.parent.innerHeight || 0) - 8); } catch(e){ h = Math.max(560, window.innerHeight); }
+    this.post({ type:'streamlit:setFrameHeight', height:h });
+  },
+  push(list){
+    if (!this.handshakeDone) return false;
+    this.post({ type:'streamlit:setComponentValue', value:{ ideas:list, ts:Date.now() }, dataType:'json' });
+    return true;
+  }
+};
+window.addEventListener('message', ev => {
+  const d = ev.data;
+  if (!d || d.type !== 'streamlit:render') return;
+  Bridge.handshakeDone = true;
+  if (linkMode !== 'server') setLinkMode('streamlit');
+  const args = d.args || {};
+  let payload = args.ideas;
+  if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch(e){ payload = []; } }
+  if (mergeIdeas(payload)) refreshAll();
+  Bridge.setHeight();
+});
+
+/* ---------- Python HTTPServer API probe ---------- */
+async function probeServer(){
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 2600);
+    const res = await fetch('/api/ideas', { signal:ctrl.signal, headers:{ 'Accept':'application/json' } });
+    clearTimeout(to);
+    if (!res.ok) return false;
+    const ct = res.headers.get('content-type') || '';
+    if (ct.indexOf('json') < 0) return false;
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return false;
+    setLinkMode('server');
+    mergeIdeas(rows);
+    return true;
+  } catch(e){ return false; }
+}
+
+async function pushToServer(row){
+  try {
+    const res = await fetch('/api/ideas', {
+      method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(row)
+    });
+    return res.ok;
+  } catch(e){ return false; }
+}
+
+function setLinkMode(mode){
+  linkMode = mode;
+  const dot = $('link-dot'), label = $('link-label');
+  const map = {
+    server:    { cls:'live-dot',      txt:'SERVER DB',  hint:'파이썬 서버 SQLite에 실시간 영구 저장됩니다' },
+    streamlit: { cls:'live-dot',      txt:'CLOUD DB',   hint:'Streamlit 서버 DB에 저장 + 기기 보관함 이중화' },
+    local:     { cls:'live-dot warn', txt:'LOCAL ONLY', hint:'기기에 안전 보관 후 서버 재연결 시 자동 동기화' }
+  };
+  const m = map[mode] || map.local;
+  if (dot) dot.className = m.cls;
+  if (label) label.textContent = m.txt;
+  const fh = $('form-store-hint'); if (fh) fh.textContent = m.hint;
+  const bh = $('board-store-hint');
+  if (bh) bh.textContent = (mode === 'local') ? '기기 보관함에 저장된 목록 (서버 미연결)' : '기기 보관함 + 서버 DB 통합 목록';
+}
+
+/* 미동기화 건 자동 재전송 */
+async function flushPending(){
+  const pend = ideas.filter(i => i.pending);
+  if (!pend.length) return 0;
+  let ok = 0;
+  if (linkMode === 'server') {
+    for (const row of pend) { if (await pushToServer(row)) { row.pending = false; ok++; } }
+    if (ok) saveLocalIdeas();
+  } else if (linkMode === 'streamlit') {
+    if (Bridge.push(pend)) ok = pend.length;
+  }
+  return ok;
+}
+
+/* ========================================================================
+   UI RENDERING
+   ======================================================================== */
+function ideaCountFor(step){ return ideas.filter(i => Number(i.booth_step) === Number(step)).length; }
+function visitedSteps(){ return new Set(ideas.map(i => Number(i.booth_step)).filter(n => n >= 1 && n <= TOTAL)); }
+
+function renderRail(){
+  const rail = $('rail'); if (!rail) return;
+  rail.innerHTML = '';
+  BOOTH_DATA.forEach((b, idx) => {
+    const n = document.createElement('button');
+    n.type = 'button';
+    n.className = 'step-node' + (idx === currentIndex ? ' active' : '') + (ideaCountFor(b.step) ? ' done' : '');
+    n.title = b.step + '. ' + b.company + ' [' + b.id + ']';
+    n.setAttribute('aria-label', n.title);
+    n.innerHTML = String(b.step).padStart(2,'0') + '<span class="tick"></span>';
+    n.addEventListener('click', () => { stopTour(); fx('nav', 12); selectStep(idx, true); });
+    rail.appendChild(n);
+  });
+  const act = rail.children[currentIndex];
+  if (act && act.scrollIntoView) act.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+}
+
+function selectStep(index, fly){
+  if (index < 0 || index >= TOTAL) return;
+  currentIndex = index;
+  const b = BOOTH_DATA[index];
+
+  $('n-num').textContent = '[' + String(b.step).padStart(2,'0') + '/' + TOTAL + ']';
+  $('n-id').textContent = b.id;
+  $('n-title').textContent = b.company;
+
+  $('d-step').textContent = 'STEP ' + String(b.step).padStart(2,'0');
+  $('d-id').textContent = b.id;
+  $('d-track').textContent = b.trackName;
+  $('d-company').textContent = b.company;
+  $('d-hall').textContent = b.hall;
+  $('d-process').textContent = b.process;
+  $('d-highlight').textContent = b.highlight;
+  $('d-ideacount').textContent = ideaCountFor(b.step);
+  const nx = BOOTH_DATA[(index + 1) % TOTAL];
+  $('d-next').textContent = nx.step + '. ' + nx.shortName;
+
+  boothGroups.forEach((g, i) => { g.userData.selected = (i === index); });
+  openCard();
+  if (fly) focusBooth(b);
+  renderRail();
+}
+
+function openCard(){
+  $('booth-card').classList.remove('closed');
+  const dk = $('btn-dock'); dk.style.opacity = '0'; dk.style.pointerEvents = 'none';
+}
+function closeCard(){
+  $('booth-card').classList.add('closed');
+  const dk = $('btn-dock'); dk.style.opacity = '1'; dk.style.pointerEvents = 'auto';
+}
+
+function refreshAll(){
+  $('badge-count').textContent = ideas.length;
+  $('board-count').textContent = ideas.length + '건';
+  const vis = visitedSteps();
+  const pct = Math.min(100, Math.round((vis.size / TOTAL) * 100));
+  $('board-progress-text').textContent = vis.size + ' / ' + TOTAL + ' · ' + pct + '%';
+  $('board-progress-bar').style.width = pct + '%';
+  const strip = $('board-step-strip');
+  if (strip) {
+    strip.innerHTML = '';
+    BOOTH_DATA.forEach(b => {
+      const s = document.createElement('div');
+      const on = vis.has(b.step);
+      s.title = b.step + '. ' + b.shortName + (on ? ' · 작성완료' : ' · 미작성');
+      s.style.cssText = 'flex:1;height:5px;border-radius:99px;background:' + (on ? 'linear-gradient(90deg,#00D2FF,#FBBF24)' : 'rgba(148,163,184,.16)');
+      strip.appendChild(s);
+    });
+  }
+  $('d-ideacount').textContent = ideaCountFor(BOOTH_DATA[currentIndex].step);
+  renderRail();
+  if ($('modal-board').classList.contains('open')) renderBoard();
+}
+
+/* ---------- toast ---------- */
+let toastTimer = null;
+function toast(msg, kind){
+  const t = $('toast'), ic = $('toast-icon');
+  $('toast-text').textContent = msg;
+  const map = { ok:['#i-check','var(--em)'], warn:['#i-signal','var(--am-lit)'], err:['#i-x','var(--danger)'], info:['#i-signal','var(--cy)'] };
+  const m = map[kind || 'ok'] || map.ok;
+  ic.innerHTML = '<use href="' + m[0] + '"/>';
+  ic.style.color = m[1];
+  t.classList.remove('hide');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hide'), 2800);
+}
+
+/* ========================================================================
+   IDEA FORM
+   ======================================================================== */
+function openForm(index){
+  const b = BOOTH_DATA[(index == null) ? currentIndex : index];
+  let u = {};
+  try { u = JSON.parse(lsGet(LS_USER) || '{}'); } catch(e){ u = {}; }
+  if (u.author) $('f-author').value = u.author;
+  if (u.factory) { const s = $('f-factory'); if ([].some.call(s.options, o => o.value === u.factory)) s.value = u.factory; }
+  $('f-booth').value = b.step + '. ' + b.company + ' (' + b.id + ')';
+  $('f-booth').dataset.step = b.step;
+  $('f-booth').dataset.bid = b.id;
+  markActiveChip(b.step);
+  $('modal-form').classList.add('open');
+  setTimeout(() => { if (!$('f-author').value) $('f-author').focus(); }, 320);
+}
+function closeForm(){ $('modal-form').classList.remove('open'); stopVoice(); }
+
+function markActiveChip(step){
+  document.querySelectorAll('#booth-chips .chip').forEach(c => {
+    c.classList.toggle('on', Number(c.dataset.step) === Number(step));
+  });
+}
+
+function buildBoothChips(){
+  const box = $('booth-chips');
+  BOOTH_DATA.forEach(b => {
+    const c = document.createElement('button');
+    c.type = 'button'; c.className = 'chip'; c.dataset.step = b.step; c.dataset.bid = b.id;
+    c.innerHTML = '<span class="mono">' + String(b.step).padStart(2,'0') + '</span> ' + esc(b.shortName);
+    c.addEventListener('click', () => {
+      $('f-booth').value = b.step + '. ' + b.company + ' (' + b.id + ')';
+      $('f-booth').dataset.step = b.step;
+      $('f-booth').dataset.bid = b.id;
+      markActiveChip(b.step);
+      fx('click', 6);
+    });
+    box.appendChild(c);
+  });
+}
+
+async function submitIdea(e){
+  e.preventDefault();
+  const author = $('f-author').value.trim();
+  const factory = $('f-factory').value;
+  const boothStr = $('f-booth').value.trim();
+  const ideaText = $('f-idea').value.trim();
+  const benefits = [].map.call(document.querySelectorAll('#benefits input:checked'), c => c.value);
+
+  if (!author || !boothStr || !ideaText) { fx('warn', [20,40,20]); toast('이름 · 부스 · 아이디어는 필수 입력입니다', 'err'); return; }
+
+  lsSet(LS_USER, JSON.stringify({ author, factory }));
+
+  let step = Number($('f-booth').dataset.step) || null;
+  let bid = $('f-booth').dataset.bid || '';
+  const m = boothStr.match(/^(\d+)\./);
+  if (m) {
+    step = parseInt(m[1], 10);
+    const found = BOOTH_DATA.find(b => b.step === step);
+    if (found) bid = found.id;
+  }
+
+  const row = {
+    uuid: 'ID_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    booth_step: step, booth_id: bid, booth_name: boothStr,
+    author, factory, idea_text: ideaText,
+    benefits: benefits.join(', '),
+    created_at: nowStamp(),
+    pending: true
+  };
+
+  ideas.unshift(row);
+  saveLocalIdeas();
+  refreshAll();
+
+  const btn = $('btn-submit'); const label = $('submit-label');
+  btn.disabled = true; label.textContent = '저장 중…';
+
+  let synced = false;
+  if (linkMode === 'server') synced = await pushToServer(row);
+  else if (linkMode === 'streamlit') synced = Bridge.push([row]);
+  if (synced) row.pending = false;
+  saveLocalIdeas();
+
+  btn.disabled = false; label.textContent = '아이디어 저장';
+  fx('save', [12,30,12]);
+  $('f-idea').value = '';
+  closeForm();
+  refreshAll();
+  toast(synced ? '서버 DB에 영구 저장되었습니다' : '기기에 저장했습니다 · 서버 연결 시 자동 전송', synced ? 'ok' : 'warn');
+}
+
+/* ---------- 음성 인식 ---------- */
+let recog = null, recActive = false;
+function stopVoice(){
+  if (recog && recActive) { try { recog.stop(); } catch(e){} }
+  recActive = false;
+  $('mic-icon').classList.remove('rec-on');
+  $('voice-label').textContent = '말해서 입력';
+  $('btn-voice').classList.remove('btn-am'); $('btn-voice').classList.add('btn-ghost-cy');
+}
+function toggleVoice(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('이 브라우저는 음성 인식을 지원하지 않습니다 (크롬 권장)', 'err'); fx('warn', 25); return; }
+  if (recActive) { stopVoice(); return; }
+  try {
+    recog = new SR();
+    recog.lang = 'ko-KR'; recog.continuous = true; recog.interimResults = true;
+    let base = $('f-idea').value;
+    recog.onstart = () => {
+      recActive = true;
+      $('mic-icon').classList.add('rec-on');
+      $('voice-label').textContent = '듣는 중… 탭하여 종료';
+      $('btn-voice').classList.remove('btn-ghost-cy'); $('btn-voice').classList.add('btn-am');
+      base = $('f-idea').value;
+      fx('sweep', 14);
+      toast('음성 인식을 시작합니다. 또렷하게 말씀해 주세요', 'info');
+    };
+    recog.onresult = ev => {
+      let finalTxt = '', interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const tr = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalTxt += tr; else interim += tr;
+      }
+      if (finalTxt) base = (base ? base + ' ' : '') + finalTxt.trim();
+      $('f-idea').value = base + (interim ? ' ' + interim : '');
+    };
+    recog.onerror = ev => {
+      stopVoice();
+      const msg = (ev.error === 'not-allowed' || ev.error === 'service-not-allowed')
+        ? '마이크 권한이 차단되었습니다. 브라우저 주소창에서 허용해 주세요'
+        : '음성 인식 오류: ' + ev.error;
+      toast(msg, 'err');
+    };
+    recog.onend = () => { if (recActive) stopVoice(); };
+    recog.start();
+  } catch(err){ stopVoice(); toast('음성 인식을 시작할 수 없습니다', 'err'); }
+}
+
+/* ========================================================================
+   IDEAS BOARD
+   ======================================================================== */
+function renderBoard(){
+  const box = $('board-list');
+  box.innerHTML = '';
+  if (!ideas.length) {
+    box.innerHTML = '<div style="padding:34px 12px;text-align:center;color:var(--ink-faint)">'
+      + '<svg class="ic" style="font-size:30px;opacity:.45"><use href="#i-db"/></svg>'
+      + '<div style="margin-top:10px;font-size:12px;font-weight:700">아직 등록된 아이디어가 없습니다</div>'
+      + '<div style="margin-top:3px;font-size:10.5px">부스에서 ‘아이디어’ 버튼을 눌러 첫 제안을 남겨보세요</div></div>';
+    return;
+  }
+  ideas.forEach(it => {
+    const card = document.createElement('div');
+    card.className = 'idea-card fade-up' + (it.pending ? ' pending' : '');
+    const bd = BOOTH_DATA.find(b => b.step === Number(it.booth_step));
+    const accent = bd ? hex(bd.color) : '#00D2FF';
+    card.innerHTML =
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'
+      +   '<div style="min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap">'
+      +     '<span class="mono" style="padding:1px 6px;border-radius:6px;font-size:9.5px;font-weight:800;background:rgba(0,210,255,.14);color:#00D2FF;border:1px solid rgba(0,210,255,.3)">'
+      +       (it.booth_step ? String(it.booth_step).padStart(2,'0') : '--') + '</span>'
+      +     '<span class="mono" style="padding:1px 6px;border-radius:6px;font-size:9.5px;font-weight:800;background:rgba(245,158,11,.14);color:#FBBF24;border:1px solid rgba(245,158,11,.35)">'
+      +       esc(it.booth_id || '-') + '</span>'
+      +     '<strong style="font-size:11.5px;font-weight:800;color:' + accent + '">' + esc(it.booth_name || '') + '</strong>'
+      +   '</div>'
+      +   (it.pending ? '<span class="mono" style="flex:none;font-size:8.5px;font-weight:800;padding:2px 6px;border-radius:6px;background:rgba(245,158,11,.2);color:#FBBF24">미동기화</span>' : '')
+      + '</div>'
+      + '<div style="margin-top:7px;padding:9px 10px;border-radius:11px;background:rgba(2,6,16,.6);border:1px solid var(--stroke);font-size:12px;line-height:1.55;color:#DCE7F7;font-weight:500;-webkit-user-select:text;user-select:text">'
+      +   esc(it.idea_text) + '</div>'
+      + (it.benefits ? '<div class="mono" style="margin-top:6px;font-size:9.5px;color:var(--em);font-weight:700">▸ ' + esc(it.benefits) + '</div>' : '')
+      + '<div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:10px;color:var(--ink-faint);font-weight:600">'
+      +   '<span>' + esc(it.author) + ' · ' + esc(it.factory || '') + '</span>'
+      +   '<span class="mono">' + esc(it.created_at || '') + '</span>'
+      + '</div>';
+    box.appendChild(card);
+  });
+}
+
+function buildReportText(){
+  const vis = visitedSteps();
+  let out = '[세아특수강 CDM 봉강생산팀] FIX 2026 참관 아이디어\n';
+  out += '· 총 ' + ideas.length + '건 / 추천 부스 ' + vis.size + '개 작성 (' + Math.round(vis.size/TOTAL*100) + '%)\n';
+  out += '· 추출 시각 ' + nowStamp() + '\n';
+  out += '──────────────────────────────\n';
+  const byStep = ideas.slice().sort((a,b) => (Number(a.booth_step)||99) - (Number(b.booth_step)||99));
+  byStep.forEach((it, i) => {
+    out += '\n' + (i+1) + ') [' + (it.booth_id || '-') + '] ' + (it.booth_name || '') + '\n';
+    out += '   · 제안: ' + it.idea_text + '\n';
+    if (it.benefits) out += '   · 기대효과: ' + it.benefits + '\n';
+    out += '   · 작성: ' + it.author + ' (' + (it.factory || '') + ') ' + (it.created_at || '') + '\n';
+  });
+  return out;
+}
+
+async function copyReport(){
+  if (!ideas.length) { toast('복사할 아이디어가 없습니다', 'warn'); return; }
+  const text = buildReportText();
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch(e){ ok = false; }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;top:-2000px;left:0;opacity:0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch(e){ ok = false; }
+  }
+  fx(ok ? 'save' : 'warn', 12);
+  toast(ok ? '카톡에 붙여넣기 할 수 있도록 복사했습니다' : '복사에 실패했습니다. 길게 눌러 직접 선택해 주세요', ok ? 'ok' : 'err');
+}
+
+function downloadCsv(){
+  if (!ideas.length) { toast('내보낼 아이디어가 없습니다', 'warn'); return; }
+  const head = ['순번','부스번호','부스/기업명','작성자','소속공정','제안아이디어','기대효과','등록일시'];
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const rows = ideas.slice().sort((a,b) => (Number(a.booth_step)||99) - (Number(b.booth_step)||99));
+  let csv = '﻿' + head.join(',') + '\n';
+  rows.forEach((it, i) => {
+    csv += [i+1, q(it.booth_id||''), q(it.booth_name||''), q(it.author||''), q(it.factory||''),
+            q(it.idea_text||''), q(it.benefits||''), q(it.created_at||'')].join(',') + '\n';
+  });
+  try {
+    const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SeAH_CDM_FIX2026_ideas_' + nowStamp().replace(/[: -]/g,'') + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1200);
+    fx('save', 10);
+    toast('CSV 파일을 내려받았습니다 (엑셀 바로 열기)', 'ok');
+  } catch(e){ toast('다운로드를 시작할 수 없습니다', 'err'); }
+}
+
+async function syncNow(){
+  const ic = $('sync-icon');
+  ic.classList.add('spin');
+  let ok = false;
+  if (!Bridge.handshakeDone) ok = await probeServer();
+  else { setLinkMode('streamlit'); ok = true; }
+  const n = await flushPending();
+  refreshAll();
+  setTimeout(() => ic.classList.remove('spin'), 700);
+  fx('click', 8);
+  if (linkMode === 'local') toast('서버에 연결할 수 없습니다 · 기기 보관함 유지', 'warn');
+  else toast(n ? ('서버와 동기화 완료 · 미전송 ' + n + '건 전송') : '서버와 최신 상태입니다', 'ok');
+}
+
+/* ========================================================================
+   AUTO TOUR
+   ======================================================================== */
+function startTour(){
+  isAutoTour = true;
+  $('tour-icon').innerHTML = '<use href="#i-pause"/>';
+  $('v-tour').classList.remove('btn-ghost-am'); $('v-tour').classList.add('btn-am');
+  toast('1~11번 자동 투어를 시작합니다', 'info');
+  autoTourTimer = setInterval(() => {
+    fx('nav', 10);
+    selectStep((currentIndex + 1) % TOTAL, true);
+  }, 4200);
+}
+function stopTour(){
+  if (!isAutoTour) return;
+  isAutoTour = false;
+  clearInterval(autoTourTimer);
+  $('tour-icon').innerHTML = '<use href="#i-play"/>';
+  $('v-tour').classList.add('btn-ghost-am'); $('v-tour').classList.remove('btn-am');
+}
+
+/* ========================================================================
+   EVENTS
+   ======================================================================== */
+function wireEvents(){
+  document.addEventListener('pointerdown', e => {
+    Sfx.boot();
+    const el = e.target.closest ? e.target.closest('button,.chip,.bcheck') : null;
+    if (el && !el.dataset.silent) Sfx.click();
+  }, true);
+
+  $('n-prev').addEventListener('click', () => { stopTour(); fx('nav', 12); selectStep((currentIndex - 1 + TOTAL) % TOTAL, true); });
+  $('n-next').addEventListener('click', () => { stopTour(); fx('nav', 12); selectStep((currentIndex + 1) % TOTAL, true); });
+  $('n-info').addEventListener('click', () => { openCard(); focusBooth(BOOTH_DATA[currentIndex]); });
+  $('n-add').addEventListener('click', () => openForm());
+
+  $('btn-new').addEventListener('click', () => openForm());
+  $('btn-board').addEventListener('click', () => { renderBoard(); $('modal-board').classList.add('open'); });
+  $('board-close').addEventListener('click', () => $('modal-board').classList.remove('open'));
+  $('modal-board').addEventListener('click', e => { if (e.target === $('modal-board')) $('modal-board').classList.remove('open'); });
+
+  $('form-close').addEventListener('click', closeForm);
+  $('modal-form').addEventListener('click', e => { if (e.target === $('modal-form')) closeForm(); });
+  $('idea-form').addEventListener('submit', submitIdea);
+  $('btn-voice').addEventListener('click', toggleVoice);
+
+  $('d-close').addEventListener('click', closeCard);
+  $('d-collapse').addEventListener('click', closeCard);
+  $('grabber').addEventListener('click', closeCard);
+  $('btn-dock').addEventListener('click', () => { openCard(); fx('click', 8); });
+  $('d-add').addEventListener('click', () => openForm());
+  $('d-focus').addEventListener('click', () => { stopTour(); focusBooth(BOOTH_DATA[currentIndex]); fx('click', 8); });
+  $('d-go-next').addEventListener('click', () => { stopTour(); fx('nav', 12); selectStep((currentIndex + 1) % TOTAL, true); });
+
+  $('v-iso').addEventListener('click', () => { viewIso(); setViewBtn('v-iso'); fx('click', 8); });
+  $('v-top').addEventListener('click', () => { viewTop(); setViewBtn('v-top'); fx('click', 8); });
+  $('v-reset').addEventListener('click', () => { viewIso(); setViewBtn('v-iso'); fx('sweep', 10); });
+  $('v-route').addEventListener('click', () => {
+    if (!routeGroup) return;
+    routeGroup.visible = !routeGroup.visible;
+    $('v-route').style.opacity = routeGroup.visible ? '1' : '.45';
+    fx('click', 8);
+    toast(routeGroup.visible ? '최적 동선을 표시합니다' : '동선을 숨겼습니다', 'info');
+  });
+  $('v-tour').addEventListener('click', () => { isAutoTour ? stopTour() : startTour(); fx('click', 10); });
+
+  $('b-copy').addEventListener('click', copyReport);
+  $('b-csv').addEventListener('click', downloadCsv);
+  $('b-sync').addEventListener('click', syncNow);
+  $('b-add').addEventListener('click', () => { $('modal-board').classList.remove('open'); openForm(); });
+
+  document.querySelectorAll('#cdm-tags .tag').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ta = $('f-idea'), t = btn.dataset.text;
+      ta.value = ta.value.trim() ? ta.value.trim() + ' / ' + t : t;
+      btn.classList.add('on');
+      setTimeout(() => btn.classList.remove('on'), 650);
+      fx('click', 6);
+    });
+  });
+
+  document.addEventListener('keydown', e => {
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) {
+      if (e.key === 'Escape') e.target.blur();
+      return;
+    }
+    if (e.key === 'ArrowRight'){ stopTour(); selectStep((currentIndex+1)%TOTAL, true); fx('nav',10); }
+    else if (e.key === 'ArrowLeft'){ stopTour(); selectStep((currentIndex-1+TOTAL)%TOTAL, true); fx('nav',10); }
+    else if (e.key === 'Escape'){ closeForm(); $('modal-board').classList.remove('open'); }
+  });
+
+  window.addEventListener('online', () => { syncNow(); });
+  setInterval(() => { if (ideas.some(i => i.pending)) flushPending().then(n => { if (n) refreshAll(); }); }, 30000);
+  window.addEventListener('resize', () => Bridge.setHeight(), { passive:true });
+}
+function setViewBtn(onId){
+  ['v-iso','v-top'].forEach(id => {
+    const el = $(id);
+    el.classList.toggle('btn-cy', id === onId);
+  });
+}
+
+/* ========================================================================
+   BOOT
+   ======================================================================== */
+function bootStep(pct, msg){
+  const bar = $('boot-bar'), m = $('boot-msg');
+  if (bar) bar.style.width = pct + '%';
+  if (m) m.textContent = msg;
+}
+
+async function boot(){
+  bootStep(18, 'LOADING BOOTH DATASET…');
+  ideas = loadLocalIdeas();
+
+  Bridge.announce();
+  Bridge.setHeight();
+
+  if (typeof THREE === 'undefined') {
+    bootStep(100, 'WEBGL LIBRARY BLOCKED');
+    $('boot-msg').style.color = '#F43F5E';
+    toast('3D 라이브러리를 불러오지 못했습니다 (네트워크 확인)', 'err');
+  } else {
+    bootStep(42, 'BUILDING DIGITAL TWIN…');
+    try { await (document.fonts ? document.fonts.ready : Promise.resolve()); } catch(e){}
+    initThree();
+    bootStep(72, 'CALIBRATING ROUTE PATH…');
+    animate();
+  }
+
+  buildBoothChips();
+  wireEvents();
+  setLinkMode('local');
+  selectStep(0, false);
+  refreshAll();
+
+  bootStep(88, 'LINKING DATA SOURCE…');
+  // 프레임 밖(파이썬 HTTPServer 직접 구동)일 때만 REST API 탐색 — iframe 내부는 Streamlit 브리지가 담당
+  if (!Bridge.inFrame) { await probeServer(); }
+  await flushPending();
+  refreshAll();
+
+  bootStep(100, 'READY');
+  setTimeout(() => {
+    $('boot-veil').classList.add('gone');
+    setTimeout(() => { const v = $('boot-veil'); if (v) v.style.display = 'none'; }, 700);
+    if (camera) {
+      if (window.gsap) { try { gsap.ticker.lagSmoothing(0); } catch(e){} gsapTuned = true; }
+      camera.position.set(24, 300, 360);
+      if (controls) controls.target.set(14, 0, 0);
+      viewIso();                                                  // 전체 조감
+      setTimeout(() => { focusBooth(BOOTH_DATA[0]); fx('sweep', 0); }, 1800); // 1번 부스 착지
+    }
+  }, 420);
+}
+
+/* 현장 디버그 핸들 (콘솔에서 SEAH_NAV.ideas / .mode 확인 가능) */
+window.SEAH_NAV = {
+  get booths(){ return boothGroups; },
+  get ideas(){ return ideas; },
+  get mode(){ return linkMode; },
+  get step(){ return currentIndex + 1; },
+  get cam(){ return camera; },
+  get ctrl(){ return controls; },
+  go: i => selectStep(i - 1, true),
+  exportCsv: () => downloadCsv(),
+  report: () => buildReportText()
+};
+
+if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', boot);
+else boot();
+</script>
+</body>
+</html>
